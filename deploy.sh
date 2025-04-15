@@ -31,7 +31,7 @@ apt update && apt upgrade -y
 
 # Instalar dependências do sistema
 print_message "Instalando dependências do sistema..."
-apt install -y curl wget git build-essential
+apt install -y curl wget git build-essential nginx
 
 # Instalar Node.js e npm
 print_message "Instalando Node.js e npm..."
@@ -52,10 +52,6 @@ sudo -u postgres psql -c "CREATE USER ebook_user WITH PASSWORD 'ebook_password';
 sudo -u postgres psql -c "CREATE DATABASE ebook_marketplace;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ebook_marketplace TO ebook_user;"
 
-# Instalar Nginx
-print_message "Instalando Nginx..."
-apt install -y nginx
-
 # Configurar Nginx
 print_message "Configurando Nginx..."
 cat > /etc/nginx/sites-available/ebook-marketplace << EOL
@@ -65,6 +61,15 @@ server {
 
     location / {
         proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+    }
+
+    location /api {
+        proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -83,36 +88,50 @@ systemctl restart nginx
 print_message "Instalando Certbot para SSL..."
 apt install -y certbot python3-certbot-nginx
 
-# Clonar repositório (substitua com seu repositório)
-print_message "Clonando repositório..."
-git clone https://seu-repositorio/ebook-marketplace.git /opt/ebook-marketplace
+# Clonar repositórios
+print_message "Clonando repositórios..."
+mkdir -p /opt/ebook-marketplace
 cd /opt/ebook-marketplace
 
-# Instalar dependências do projeto
-print_message "Instalando dependências do projeto..."
+# Frontend
+print_message "Configurando Frontend..."
+git clone https://seu-repositorio/ebook-marketplace-frontend.git frontend
+cd frontend
+npm install
+npm run build
+
+# Backend
+print_message "Configurando Backend..."
+cd ..
+git clone https://seu-repositorio/ebook-marketplace-backend.git backend
+cd backend
 npm install
 
-# Configurar variáveis de ambiente
-print_message "Configurando variáveis de ambiente..."
+# Configurar variáveis de ambiente do backend
 cat > .env << EOL
 DATABASE_URL=postgresql://ebook_user:ebook_password@localhost:5432/ebook_marketplace
 JWT_SECRET=sua_chave_secreta_aqui
 NODE_ENV=production
-PORT=3000
+PORT=3001
 EOL
 
-# Construir aplicação
-print_message "Construindo aplicação..."
-npm run build
+# Iniciar aplicações com PM2
+print_message "Iniciando aplicações com PM2..."
 
-# Iniciar aplicação com PM2
-print_message "Iniciando aplicação com PM2..."
-pm2 start npm --name "ebook-marketplace" -- start
+# Frontend
+cd ../frontend
+pm2 start npm --name "ebook-marketplace-frontend" -- start
+
+# Backend
+cd ../backend
+pm2 start npm --name "ebook-marketplace-backend" -- start
+
+# Salvar configuração do PM2
 pm2 save
 pm2 startup
 
 print_message "Deploy concluído com sucesso!"
 print_warning "Por favor, configure o domínio no Nginx e obtenha um certificado SSL com:"
 print_warning "sudo certbot --nginx -d seu-dominio.com"
-print_message "Para verificar o status da aplicação: pm2 status"
-print_message "Para ver os logs: pm2 logs ebook-marketplace" 
+print_message "Para verificar o status das aplicações: pm2 status"
+print_message "Para ver os logs: pm2 logs" 
